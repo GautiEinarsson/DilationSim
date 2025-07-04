@@ -1,207 +1,110 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
+import numpy as np
+from scipy.optimize import curve_fit
+import logging
 
-# C extensions
-*.so
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+# Experiment constants
+c = 299792458  # Speed of light (m/s)
+v = 1500       # Disk edge speed (m/s)
+R = 0.5        # Disk radius (m)
+radi = np.linspace(0, R, 200)  # 200 radial points from center to edge
+y_default = 1.6e-12  # Fifth dimension size (m)
+noise_level = 7e-19  # Thorium-229m clock noise (s)
+vibration_noise = 7e-19  # Vibration noise amplitude (s)
+num_runs = 20  # Number of simulation runs per warp factor
+warp_factors = [1.0e7, 2.0e7, 2.5e7, 3.0e7]  # Warp factors (1/m)
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+# 4D time dilation: gamma = 1 / sqrt(1 - v_r^2 / c^2)
+def time_dilation_4d(r, v, c):
+    v_r = v * r / R  # Velocity at radius r
+    gamma = 1 / np.sqrt(1 - v_r**2 / c**2)  # Corrected exponentiation
+    return gamma
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# 5D time dilation for curve fitting: gamma * exp(-a_scaled * r + b)
+def time_dilation_5d(r, a_scaled, b):
+    v_r = v * r / R  # Velocity at radius r
+    gamma = 1 / np.sqrt(1 - (v_r / c)**2)
+    warp_factor = np.exp(-a_scaled * r + b)  # 5D warping effect
+    return gamma * warp_factor
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
+# Dictionary to store results
+results = {}
 
-# Translations
-*.mo
-*.pot
+# Loop over warp factors
+for k in warp_factors:
+    data_5d = []
+    # Generate 5D data with noise
+    for run in range(num_runs):
+        np.random.seed(run + 1)  # Unique seed for reproducibility
+        t_0 = np.array([time_dilation_4d(r, v, c) for r in radi], dtype=np.float64)
+        t_5d = t_0 * np.exp(-k * y_default * radi)  # Apply 5D warping
+        noise = (np.random.normal(0, 1, size=radi.shape) * noise_level +
+                 vibration_noise * np.sin(2 * np.pi * radi / R))  # Gaussian + vibrational noise
+        t_5d = t_5d + noise
+        data_5d.append(t_5d)
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+    # Fit 5D model
+    popt_list, rmse_5d_list = [], []
+    for run, t_5d in enumerate(data_5d):
+        try:
+            a_scaled_init = k * 1.6e-12 * (1 + np.random.uniform(-0.00005, 0.00005))
+            a_scaled_init = np.clip(a_scaled_init, k * 0.9999 * 1.6e-12,
+                                    k * 1.0001 * 1.6e-12)
+            p0 = [a_scaled_init, np.random.uniform(-5e-10, 5e-10)]
+            popt, _ = curve_fit(time_dilation_5d, radi, t_5d, p0=p0,
+                                bounds=([k * 0.9999 * 1.6e-12, -5e-10],
+                                        [k * 1.0001 * 1.6e-12, 5e-10]),
+                                sigma=np.ones_like(t_5d) / noise_level,
+                                method='trf', maxfev=30000, ftol=1e-11, xtol=1e-11)
+            popt_list.append(popt)
+            t_fit = time_dilation_5d(radi, *popt)
+            rmse_5d = np.sqrt(np.mean((t_5d - t_fit)**2))
+            rmse_5d_list.append(rmse_5d)
+        except RuntimeError as e:
+            logging.warning(f"Curve fit failed for k={k}, run={run}: {e}")
+            continue
 
-# Flask stuff:
-instance/
-.webassets-cache
+    # Calculate statistics
+    avg_rmse_5d = np.mean(rmse_5d_list) if rmse_5d_list else 0
+    std_rmse_5d = np.std(rmse_5d_list) if len(rmse_5d_list) > 1 else 0
+    ci_rmse_5d = 1.96 * std_rmse_5d / np.sqrt(len(rmse_5d_list)) if len(rmse_5d_list) > 1 else 0
+    avg_a_scaled = np.mean([p[0] for p in popt_list]) if popt_list else 0
+    std_a_scaled = np.std([p[0] for p in popt_list]) if len(popt_list) > 1 else 0
+    ci_a_scaled = 1.96 * std_a_scaled / np.sqrt(len(popt_list)) if len(popt_list) > 1 else 0
+    avg_b = np.mean([p[1] for p in popt_list]) if popt_list else 0
+    std_b = np.std([p[1] for p in popt_list]) if len(popt_list) > 1 else 0
+    ci_b = 1.96 * std_b / np.sqrt(len(popt_list)) if len(popt_list) > 1 else 0
+    avg_a = avg_a_scaled / k if k != 0 else 0
+    std_a = std_a_scaled / k if k != 0 else 0
+    ci_a = ci_a_scaled / k if k != 0 else 0
 
-# Scrapy stuff:
-.scrapy
+    # Store results
+    results[k] = {
+        'rmse_4d': np.sqrt(np.mean((data_5d[0] - t_0)**2)),
+        'avg_rmse_5d': avg_rmse_5d,
+        'std_rmse_5d': std_rmse_5d,
+        'ci_rmse_5d': ci_rmse_5d,
+        'avg_a': avg_a,
+        'std_a': std_a,
+        'ci_a': ci_a,
+        'avg_b': avg_b,
+        'std_b': std_b,
+        'ci_b': ci_b,
+        'data_5d': data_5d[0],
+        't_fit': t_fit
+    }
 
-# Sphinx documentation
-docs/_build/
+# Print results summary
+def print_results(results):
+    print("Simulation Results Summary:")
+    for k in results:
+        print(f"\nWarp Factor k = {k:.1e} 1/m")
+        print(f"4D RMSE: {results[k]['rmse_4d']:.3e}")
+        print(f"5D RMSE: {results[k]['avg_rmse_5d']:.3e} +/- {results[k]['ci_rmse_5d']:.3e}")
+        print(f"Fitted a: {results[k]['avg_a']:.3e} +/- {results[k]['ci_a']:.3e} m")
+        print(f"Fitted b: {results[k]['avg_b']:.3e} +/- {results[k]['ci_b']:.3e}")
 
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
-
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-#poetry.toml
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-#pdm.lock
-#pdm.toml
-.pdm-python
-.pdm-build/
-
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-#pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Abstra
-# Abstra is an AI-powered process automation framework.
-# Ignore directories containing user credentials, local state, and settings.
-# Learn more at https://abstra.io/docs
-.abstra/
-
-# Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# Cursor
-#  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
-
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+if __name__ == "__main__":
+    print_results(results)
