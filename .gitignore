@@ -1,110 +1,22 @@
-import numpy as np
-from scipy.optimize import curve_fit
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-
-# Experiment constants
-c = 299792458  # Speed of light (m/s)
-v = 1500       # Disk edge speed (m/s)
-R = 0.5        # Disk radius (m)
-radi = np.linspace(0, R, 200)  # 200 radial points from center to edge
-y_default = 1.6e-12  # Fifth dimension size (m)
-noise_level = 7e-19  # Thorium-229m clock noise (s)
-vibration_noise = 7e-19  # Vibration noise amplitude (s)
-num_runs = 20  # Number of simulation runs per warp factor
-warp_factors = [1.0e7, 2.0e7, 2.5e7, 3.0e7]  # Warp factors (1/m)
-
-# 4D time dilation: gamma = 1 / sqrt(1 - v_r^2 / c^2)
-def time_dilation_4d(r, v, c):
-    v_r = v * r / R  # Velocity at radius r
-    gamma = 1 / np.sqrt(1 - v_r**2 / c**2)  # Corrected exponentiation
-    return gamma
-
-# 5D time dilation for curve fitting: gamma * exp(-a_scaled * r + b)
-def time_dilation_5d(r, a_scaled, b):
-    v_r = v * r / R  # Velocity at radius r
-    gamma = 1 / np.sqrt(1 - (v_r / c)**2)
-    warp_factor = np.exp(-a_scaled * r + b)  # 5D warping effect
-    return gamma * warp_factor
-
-# Dictionary to store results
-results = {}
-
-# Loop over warp factors
-for k in warp_factors:
-    data_5d = []
-    # Generate 5D data with noise
-    for run in range(num_runs):
-        np.random.seed(run + 1)  # Unique seed for reproducibility
-        t_0 = np.array([time_dilation_4d(r, v, c) for r in radi], dtype=np.float64)
-        t_5d = t_0 * np.exp(-k * y_default * radi)  # Apply 5D warping
-        noise = (np.random.normal(0, 1, size=radi.shape) * noise_level +
-                 vibration_noise * np.sin(2 * np.pi * radi / R))  # Gaussian + vibrational noise
-        t_5d = t_5d + noise
-        data_5d.append(t_5d)
-
-    # Fit 5D model
-    popt_list, rmse_5d_list = [], []
-    for run, t_5d in enumerate(data_5d):
-        try:
-            a_scaled_init = k * 1.6e-12 * (1 + np.random.uniform(-0.00005, 0.00005))
-            a_scaled_init = np.clip(a_scaled_init, k * 0.9999 * 1.6e-12,
-                                    k * 1.0001 * 1.6e-12)
-            p0 = [a_scaled_init, np.random.uniform(-5e-10, 5e-10)]
-            popt, _ = curve_fit(time_dilation_5d, radi, t_5d, p0=p0,
-                                bounds=([k * 0.9999 * 1.6e-12, -5e-10],
-                                        [k * 1.0001 * 1.6e-12, 5e-10]),
-                                sigma=np.ones_like(t_5d) / noise_level,
-                                method='trf', maxfev=30000, ftol=1e-11, xtol=1e-11)
-            popt_list.append(popt)
-            t_fit = time_dilation_5d(radi, *popt)
-            rmse_5d = np.sqrt(np.mean((t_5d - t_fit)**2))
-            rmse_5d_list.append(rmse_5d)
-        except RuntimeError as e:
-            logging.warning(f"Curve fit failed for k={k}, run={run}: {e}")
-            continue
-
-    # Calculate statistics
-    avg_rmse_5d = np.mean(rmse_5d_list) if rmse_5d_list else 0
-    std_rmse_5d = np.std(rmse_5d_list) if len(rmse_5d_list) > 1 else 0
-    ci_rmse_5d = 1.96 * std_rmse_5d / np.sqrt(len(rmse_5d_list)) if len(rmse_5d_list) > 1 else 0
-    avg_a_scaled = np.mean([p[0] for p in popt_list]) if popt_list else 0
-    std_a_scaled = np.std([p[0] for p in popt_list]) if len(popt_list) > 1 else 0
-    ci_a_scaled = 1.96 * std_a_scaled / np.sqrt(len(popt_list)) if len(popt_list) > 1 else 0
-    avg_b = np.mean([p[1] for p in popt_list]) if popt_list else 0
-    std_b = np.std([p[1] for p in popt_list]) if len(popt_list) > 1 else 0
-    ci_b = 1.96 * std_b / np.sqrt(len(popt_list)) if len(popt_list) > 1 else 0
-    avg_a = avg_a_scaled / k if k != 0 else 0
-    std_a = std_a_scaled / k if k != 0 else 0
-    ci_a = ci_a_scaled / k if k != 0 else 0
-
-    # Store results
-    results[k] = {
-        'rmse_4d': np.sqrt(np.mean((data_5d[0] - t_0)**2)),
-        'avg_rmse_5d': avg_rmse_5d,
-        'std_rmse_5d': std_rmse_5d,
-        'ci_rmse_5d': ci_rmse_5d,
-        'avg_a': avg_a,
-        'std_a': std_a,
-        'ci_a': ci_a,
-        'avg_b': avg_b,
-        'std_b': std_b,
-        'ci_b': ci_b,
-        'data_5d': data_5d[0],
-        't_fit': t_fit
-    }
-
-# Print results summary
-def print_results(results):
-    print("Simulation Results Summary:")
-    for k in results:
-        print(f"\nWarp Factor k = {k:.1e} 1/m")
-        print(f"4D RMSE: {results[k]['rmse_4d']:.3e}")
-        print(f"5D RMSE: {results[k]['avg_rmse_5d']:.3e} +/- {results[k]['ci_rmse_5d']:.3e}")
-        print(f"Fitted a: {results[k]['avg_a']:.3e} +/- {results[k]['ci_a']:.3e} m")
-        print(f"Fitted b: {results[k]['avg_b']:.3e} +/- {results[k]['ci_b']:.3e}")
-
-if __name__ == "__main__":
-    print_results(results)
+### AL ###
+#Template for AL projects for Dynamics 365 Business Central
+#launch.json folder
+.vscode/
+#Cache folder
+.alcache/
+#Symbols folder
+.alpackages/
+#Snapshots folder
+.snapshots/
+#Testing Output folder
+.output/
+#Extension App-file
+*.app
+#Rapid Application Development File
+rad.json
+#Translation Base-file
+*.g.xlf
+#License-file
+*.flf
+#Test results file
+TestResults.xml
