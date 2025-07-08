@@ -1,6 +1,6 @@
 # DilationSim.py: Unraveling Time Dilation in 4D and 5D
 
-Hey there! Welcome to `DilationSim.py`, a Python script I crafted to explore the fascinating concept of time dilation on a spinning disk, as featured in our *Physical Review Letters* paper, “Five-Dimensional Time Dilation on a Spinning Disk.” Imagine a 1-meter carbon fiber disk whirring at 1500 m/s, fitted with super-precise thorium-229m nuclear clocks. This code simulates that setup to test whether a fifth dimension, inspired by the Randall-Sundrum model, tweaks time dilation in ways we can measure.
+Hey there! Welcome to `DilationSim.py`, a Python script I crafted to explore the fascinating concept of time dilation on a spinning disk, “Five-Dimensional Time Dilation on a Spinning Disk.” Imagine a 1-meter carbon fiber disk whirring at 1500 m/s, fitted with super-precise thorium-229m nuclear clocks. This code simulates that setup to test whether a fifth dimension, inspired by the Randall-Sundrum model, tweaks time dilation in ways we can measure.
 
 ## What’s the Big Idea?
 
@@ -62,7 +62,7 @@ This code supports our *Physical Review Letters* paper and a proposed CubeSat mi
 
 - **Clock Precision**: We’re relying on thorium-229m clocks hitting 7 × 10⁻¹⁹ s precision, based on recent research [1].
 - **Reproducibility**: Fixed seeds (`np.random.seed(run + 1)`) ensure consistent results.
-- **Explore More**: Find the full dataset and code at [github.com/GautiEinarsson/DilatationSim](https://github.com/GautiEinarsson/DilatationSim).
+- **Explore More**: Find the full dataset and code at [github.com/GautiEinarsson/DilatationSim](https://github.com/GautiEinarsson/DilationSim).
 - **Troubleshooting**: If curve fitting fails (it happens sometimes), the script logs a warning and keeps moving.
 
 ## References
