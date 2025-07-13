@@ -58,6 +58,3 @@ The script prints a summary for each warp factor, including:
 - The script uses a fixed seed for reproducibility (`np.random.seed(run + 1)`).
 - Curve fitting bounds are set to ensure stability (`±0.01%` for `a_scaled`, `±5e-10` for `b`).
 - Logging is configured to warn about curve fitting failures.
-
-## License
-This project is unlicensed and provided as-is for educational purposes.
